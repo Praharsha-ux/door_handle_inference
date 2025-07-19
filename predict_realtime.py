@@ -1,4 +1,3 @@
-# predict_realtime.py (updated to use TensorFlow Lite)
 import cv2
 import numpy as np
 import argparse
@@ -25,7 +24,7 @@ output_details = interpreter.get_output_details()
 IMG_SIZE = 128
 labels = ['knob', 'handle']
 
-# Load object detector (Faster R-CNN)
+# Load Faster R-CNN
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 faster_rcnn = models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
 faster_rcnn.to(device).eval()
@@ -40,10 +39,10 @@ def detect_doorhandle(image):
         outputs = faster_rcnn(image_tensor)[0]
     handles = []
     for bbox, score in zip(outputs['boxes'], outputs['scores']):
-        if score > 0.5:
+        if score > 0.7:  # stricter threshold
             x1, y1, x2, y2 = map(int, bbox)
             handles.append((x1, y1, x2, y2))
-    return handles
+    return handles[:5]  # limit to top 5
 
 def predict_tflite_model(crop):
     image = sharpen_image(crop)
@@ -57,7 +56,7 @@ def predict_tflite_model(crop):
     confidence = np.max(preds)
     return label, confidence
 
-# Image prediction
+# Image mode
 if args.image:
     print(f"Using image file: {args.image}")
     image = cv2.imread(args.image)
@@ -69,17 +68,25 @@ if args.image:
     for (x1, y1, x2, y2) in handles:
         crop = image[y1:y2, x1:x2]
         label, confidence = predict_tflite_model(crop)
+        if confidence < 0.8 or label not in ['knob', 'handle']:
+            continue
+
+        width, height = x2 - x1, y2 - y1
+        coords = f"X:{x1}, Y:{y1}, W:{width}, H:{height}"
+
         cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.putText(image, f"{label} ({confidence:.2f})", (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+        cv2.putText(image, f"{label} ({confidence:.2f})", (x1, max(y1 - 25, 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        cv2.putText(image, coords, (x1, y2 + 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+        print(f"[IMAGE] {label} | Conf: {confidence:.2f} | x={x1}, y={y1}, w={width}, h={height}")
 
     cv2.imshow("Prediction on Image", image)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
-    print("Image prediction completed.")
     exit()
 
-# Video/Webcam prediction
+# Video/Webcam mode
 if args.video:
     print(f"Using video file: {args.video}")
     cap = cv2.VideoCapture(args.video)
@@ -87,10 +94,8 @@ elif args.webcam or not args.video:
     print("Using webcam for prediction...")
     cap = cv2.VideoCapture(0)
     cv2.waitKey(2000)
-else:
-    raise ValueError("Specify --video path, --image path, or use --webcam")
 
-if not cap.isOpened():
+if not cap or not cap.isOpened():
     print("Error: Could not open video source.")
     exit()
 
@@ -103,9 +108,18 @@ while True:
     for (x1, y1, x2, y2) in handles:
         crop = frame[y1:y2, x1:x2]
         label, confidence = predict_tflite_model(crop)
+        if confidence < 0.8 or label not in ['knob', 'handle']:
+            continue
+
+        width, height = x2 - x1, y2 - y1
+        coords = f"X:{x1}, Y:{y1}, W:{width}, H:{height}"
+
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.putText(frame, f"{label} ({confidence:.2f})", (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+        cv2.putText(frame, f"{label} ({confidence:.2f})", (x1, max(y1 - 25, 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        cv2.putText(frame, coords, (x1, y2 + 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+        print(f"[VIDEO] {label} | Conf: {confidence:.2f} | x={x1}, y={y1}, w={width}, h={height}")
 
     cv2.imshow("Door Handle Detection", frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -114,4 +128,5 @@ while True:
 cap.release()
 cv2.destroyAllWindows()
 print("Door handle detection and classification completed.")
-exit()
+
+print("\nDone.")
