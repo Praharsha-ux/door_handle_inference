@@ -1,0 +1,9 @@
+tflite-runtime
+torch
+torchvision
+opencv-python
+numpy
+matplotlib
+seaborn
+scikit-learn
+
